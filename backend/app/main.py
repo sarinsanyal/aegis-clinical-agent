@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db import get_db, engine, Base
 from app import models
+from app.services import analyze_clinical_notes
 
 # Automatically create tables in PostgreSQL on startup
 Base.metadata.create_all(bind=engine)
@@ -38,3 +39,21 @@ def read_patient(patient_id: int, db: Session = Depends(get_db)):
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return patient
+
+
+@app.post("/patients/{patient_id}/summarize")
+def summarize_patient_history(patient_id: int, db: Session = Depends(get_db)):
+    # 1. Fetch patient
+    patient = db.query(models.PatientRecord).filter(models.PatientRecord.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient record not found")
+    
+    # 2. Process notes via Groq
+    try:
+        summary = analyze_clinical_notes(patient.medical_history)
+        patient.clinical_summary = summary
+        db.commit()
+        db.refresh(patient)
+        return {"status": "success", "summary": summary}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Groq API Error: {str(e)}")
